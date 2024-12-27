@@ -26,8 +26,13 @@ class PythonScriptScheduler:
         self.load_scripts()
 
         # GUI Components
-        self.script_listbox = tk.Listbox(self.root, width=60, height=10)
-        self.script_listbox.pack(pady=10)
+        self.script_list_tree = ttk.Treeview(self.root, columns=("File Name", "Time"), show="headings", height=10)
+        self.script_list_tree.heading("File Name", text="File Name")
+        self.script_list_tree.heading("Time", text="Time")
+        self.script_list_tree.column("File Name", width=300)
+        self.script_list_tree.column("Time", width=100)
+        self.script_list_tree.pack(pady=10)
+        self.update_script_tree()  # Populate the Treeview with saved scripts
 
         self.add_script_button = tk.Button(self.root, text="Add Script", command=self.add_script)
         self.add_script_button.pack(pady=5)
@@ -79,9 +84,6 @@ class PythonScriptScheduler:
         self.about_button = tk.Button(self.root, text="About", command=self.show_about)
         self.about_button.pack(pady=5)
 
-        # Schedule any loaded scripts after the Treeview is initialized
-        self.schedule_loaded_scripts()
-
     def load_scripts(self):
         """Load saved scripts from the storage file."""
         if os.path.exists(SCRIPT_STORAGE_FILE):
@@ -93,52 +95,57 @@ class PythonScriptScheduler:
         with open(SCRIPT_STORAGE_FILE, "w") as file:
             json.dump(self.scripts, file)
 
-    def update_script_listbox(self):
-        """Update the script listbox with the current scripts."""
-        self.script_listbox.delete(0, tk.END)
+    def update_script_tree(self):
+        """Update the Treeview with the current scripts and their predefined times."""
+        self.script_list_tree.delete(*self.script_list_tree.get_children())
         for script in self.scripts:
-            self.script_listbox.insert(tk.END, os.path.basename(script["file_path"]))
+            file_name = os.path.basename(script["file_path"])
+            time_display = script["time"] if script["time"] else "Not Scheduled"
+            self.script_list_tree.insert("", tk.END, values=(file_name, time_display))
 
     def add_script(self):
         file_path = filedialog.askopenfilename(filetypes=[("Python Files", "*.py")])
         if file_path and not any(script["file_path"] == file_path for script in self.scripts):
             self.scripts.append({"file_path": file_path, "time": None})  # Default no time
             self.save_scripts()
-            self.update_script_listbox()
+            self.update_script_tree()
 
     def remove_script(self):
-        selected = self.script_listbox.curselection()
+        selected = self.script_list_tree.selection()
         if selected:
-            index = selected[0]
-            self.scripts.pop(index)
+            for item in selected:
+                file_name = self.script_list_tree.item(item, "values")[0]
+                self.scripts = [s for s in self.scripts if os.path.basename(s["file_path"]) != file_name]
             self.save_scripts()
-            self.update_script_listbox()
+            self.update_script_tree()
         else:
             messagebox.showwarning("Warning", "No script selected")
 
     def schedule_script(self):
-        selected = self.script_listbox.curselection()
+        selected = self.script_list_tree.selection()
         if selected:
-            index = selected[0]
-            script = self.scripts[index]
-            time_input = simpledialog.askstring("Schedule Time", "Enter time (HH:MM 24-hour format):")
-            if time_input:
-                try:
-                    hour, minute = map(int, time_input.split(":"))
-                    script["time"] = time_input  # Update the time in the script list
-                    self.save_scripts()
-                    self.schedule_job(script)  # Schedule the job
-                    messagebox.showinfo("Success", f"Scheduled {os.path.basename(script['file_path'])} at {time_input}")
-                except ValueError:
-                    messagebox.showerror("Error", "Invalid time format")
+            for item in selected:
+                script = self.scripts[self.script_list_tree.index(item)]
+                # Check if the script already has a predefined time
+                if script["time"]:
+                    time_input = script["time"]  # Use the predefined time
+                else:
+                    # Prompt the user to provide a schedule time
+                    time_input = simpledialog.askstring("Schedule Time", "Enter time (HH:MM 24-hour format):")
+                    if not time_input:
+                        return  # Cancel scheduling if no time is provided
+                    try:
+                        hour, minute = map(int, time_input.split(":"))
+                        script["time"] = time_input  # Save the new schedule time
+                        self.save_scripts()
+                    except ValueError:
+                        messagebox.showerror("Error", "Invalid time format")
+                        return
+                self.schedule_job(script)  # Schedule the job
+                messagebox.showinfo("Success", f"Scheduled {os.path.basename(script['file_path'])} at {time_input}")
+                self.update_script_tree()
         else:
             messagebox.showwarning("Warning", "No script selected")
-
-    def schedule_loaded_scripts(self):
-        """Schedule all scripts with preset times."""
-        for script in self.scripts:
-            if script["time"]:  # Only schedule scripts with valid times
-                self.schedule_job(script)
 
     def schedule_job(self, script):
         """Schedule a job for a specific script."""
@@ -150,11 +157,12 @@ class PythonScriptScheduler:
 
     def run_now(self):
         """Run the selected script immediately."""
-        selected = self.script_listbox.curselection()
+        selected = self.script_list_tree.selection()
         if selected:
-            index = selected[0]
-            script = self.scripts[index]
-            self.run_script_with_output(script["file_path"])
+            for item in selected:
+                file_name = self.script_list_tree.item(item, "values")[0]
+                script = next(s for s in self.scripts if os.path.basename(s["file_path"]) == file_name)
+                self.run_script_with_output(script["file_path"])
         else:
             messagebox.showwarning("Warning", "No script selected")
 
